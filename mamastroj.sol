@@ -1,15 +1,10 @@
 pragma solidity ^0.4.24;
+import "./security.sol";
 
-/* This is v0.2 MamaStroj smart contract with logging in system implemented.
-   ### Major changes:
-   Client struct (+ bool logged);
-   Deal struct refers to client now (+ address cli);
-   Deals can be privitized (+ Deal hidden);
-   New mapping from addresses to pass hashes (+ mapping passes);
-   */
-
-contract MamaStroj
+contract MamaStroj is Security
 {
+	address owner;
+
     struct Client
     {
         string name;
@@ -34,6 +29,11 @@ contract MamaStroj
     mapping (bytes32 => Deal) deal_id;
     mapping (address => bytes32) passes;
     
+    modifier admin()
+    {
+    	require(owner == msg.sender);
+    	_;
+    }
 
     modifier roots(bytes32 _id)
     {
@@ -52,6 +52,15 @@ contract MamaStroj
                 }
             }
         _;
+    }
+
+    Security sc;
+
+    constructor(uint8 _secureLevel)
+    public
+    {
+    	sc = Security(_secureLevel);
+    	owner = msg.sender;
     }
     
     function checkPass(string memory pass)
@@ -73,9 +82,10 @@ contract MamaStroj
     function LogIn(string _pass)
     public
     {
+        Client storage user = clients[msg.sender];
         checkPass(_pass);
-        clients[msg.sender].logged = true;
-        emit Authorized(clients[msg.sender].name, msg.sender);
+        user.logged = true;
+        emit Authorized(user.name, msg.sender);
     }
     
     function createDeal(address _cli, string _desc)
@@ -85,44 +95,74 @@ contract MamaStroj
         Deal memory _newDeal = Deal(_cli, _desc, _id, false, false, false);
         deals[_cli].push(_newDeal);
         deal_id[_id] = _newDeal;
+        emit deal_Created(now, _cli);
     }
     
-    function dealInfo(bytes32 _id, string pass)
+    function dealInfo(bytes32 _id)
     public
+    view
+    auth(_id)
     returns(address client, string description)
     {
-        Deal memory info = deal_id[_id];
+        Deal storage info = deal_id[_id];
         return(info.cli, info.desc);
     }
     
     function approveDeal(bytes32 _id)
     public
+    roots(_id)
     returns(bool success)
     {
-        deal_id[_id].approved = true;
+    	Deal storage _deal = deal_id[_id];
+        if (_deal.approved)
+        {
+        	revert("Deal is approved already");
+        }
+        emit deal_Approved(now, _id);
     }
     
-    function confirmDeal(bytes32 _id)
+    function confirmDealByID(bytes32 _id)
     public
+    admin
     returns(bool success)
     {
-        deal_id[_id].confirmed = true;
+    	Deal storage _deal = deal_id[_id];
+    	if (_deal.confirmed)
+        {
+        	revert("Deal is confirmed already");
+        }
+        emit deal_Confirmed(now, _id);
     }
 
     function setPrivate(bytes32 _id)
+    public
+    roots(_id)
+    returns(bool success)
+    {
+    	Deal storage p = deal_id[_id];
+    	assert(!p.hidden);
+    	p.hidden = true;
+    	emit set_Private(_id);
+    }
+
+    function setPublic(bytes32 _id)
     public
     roots(_id)
     auth(_id)
     returns(bool success)
     {
     	Deal storage p = deal_id[_id];
-    	assert(!p.hidden);
-    	p.hidden = true;
+    	assert(p.hidden);
+    	p.hidden = false;
+    	emit set_Public(_id);
     }
 
-    
-    event Authorized(string, address);
-    event Signed_In(string, address);
-    event Password_Match();
-    
+    event Authorized(string passhash, address user);
+    event Signed_In(string passhash, address user);
+   	event Password_Match();
+    event set_Private(bytes32 _id);
+    event set_Public(bytes32 _id);
+    event deal_Approved(uint256 time, bytes32 _id);
+    event deal_Confirmed(uint256 time, bytes32 _id);
+    event deal_Created(uint256 time, address _for);
 }
