@@ -1,7 +1,6 @@
 pragma solidity ^0.4.24;
-import "./security.sol";
 
-contract MamaStroj is Security
+contract MamaStroj
 {
 	address owner;
 
@@ -34,13 +33,13 @@ contract MamaStroj is Security
     	require(owner == msg.sender);
     	_;
     }
-
+//Root modifier (to be deprecated)
     modifier roots(bytes32 _id)
     {
     	require(deal_id[_id].cli == msg.sender);
     	_;
     }
-    
+//Authorization modifier
     modifier auth(bytes32 _id)
     {
         Deal storage p = deal_id[_id];
@@ -54,28 +53,25 @@ contract MamaStroj is Security
         _;
     }
 
-    Security sc;
-
-    constructor(uint8 _secureLevel)
+    constructor()
     public
     {
-    	sc = Security(_secureLevel);
     	owner = msg.sender;
     }
-    
+//Pass checking func
     function checkPass(string memory pass)
     internal
     {
         assert(keccak256(pass) == passes[msg.sender]);
         emit Password_Match();
     }
-    
+// SignIN/LogIN Module begin   
     function SignIn(string name, string _pass)
     public
     {
-        Base.push(Client(name, msg.sender, false));
+        clients[msg.sender] = Client(name, msg.sender, false);
+        Base.push(clients[msg.sender]);
         passes[msg.sender] = keccak256(_pass);
-        clients[msg.sender].name = name;
         emit Signed_In(name, msg.sender);
     }
     
@@ -87,8 +83,9 @@ contract MamaStroj is Security
         user.logged = true;
         emit Authorized(user.name, msg.sender);
     }
-    
-    function createDeal(address _cli, string _desc)
+//Module end
+//Admin function: create deal
+    function newDeal(address _cli, string _desc)
     public
     {
         bytes32 _id = keccak256(now);
@@ -97,7 +94,7 @@ contract MamaStroj is Security
         deal_id[_id] = _newDeal;
         emit deal_Created(now, _cli);
     }
-    
+//Get deal information (auth required)
     function dealInfo(bytes32 _id)
     public
     view
@@ -107,7 +104,7 @@ contract MamaStroj is Security
         Deal storage info = deal_id[_id];
         return(info.cli, info.desc);
     }
-    
+//Client approves deal before it's been confirmed
     function approveDeal(bytes32 _id)
     public
     roots(_id)
@@ -120,7 +117,7 @@ contract MamaStroj is Security
         }
         emit deal_Approved(now, _id);
     }
-    
+//Admin function (confirm deal by ID)
     function confirmDealByID(bytes32 _id)
     public
     admin
@@ -133,7 +130,7 @@ contract MamaStroj is Security
         }
         emit deal_Confirmed(now, _id);
     }
-
+//Swt deal state to private 
     function setPrivate(bytes32 _id)
     public
     roots(_id)
@@ -144,7 +141,7 @@ contract MamaStroj is Security
     	p.hidden = true;
     	emit set_Private(_id);
     }
-
+//Set deal state to public (auth required)
     function setPublic(bytes32 _id)
     public
     roots(_id)
@@ -156,9 +153,16 @@ contract MamaStroj is Security
     	p.hidden = false;
     	emit set_Public(_id);
     }
+// Get deal ID by entering number in the list
+    function getDealID(uint8 deal_number)
+    public
+    returns(bytes32 r)
+    {
+        r = deals[msg.sender][deal_number].identifier;
+    }
 
-    event Authorized(string passhash, address user);
-    event Signed_In(string passhash, address user);
+    event Authorized(string name, address user);
+    event Signed_In(string name, address user);
    	event Password_Match();
     event set_Private(bytes32 _id);
     event set_Public(bytes32 _id);
