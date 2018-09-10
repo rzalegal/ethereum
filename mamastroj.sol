@@ -1,172 +1,186 @@
 pragma solidity ^0.4.24;
-
+//Any libraries/contracts were unattached for this version
 contract MamaStroj
 {
 	address owner;
-
+//Addr and Logged parameters removed
     struct Client
     {
         string name;
-        address addr;
-        bool logged;
     }
-    
+//Shortened "id"    
     struct Deal
     {
         address cli;
         string desc;
-        bytes32 identifier;
+        bytes32 id;
         bool approved;
         bool confirmed;
         bool hidden;
     }
-    
-    Client[] Base;
+//Base comes public    
+    Client[] public Base;
     
     mapping (address => Client) clients;
     mapping (address => Deal[]) deals;
-    mapping (bytes32 => Deal) deal_id;
+    mapping (bytes32 => Deal) ids;
     mapping (address => bytes32) passes;
-    
+//Admin modifier uses new Revertion() function
     modifier admin()
     {
-    	require(owner == msg.sender);
+    	Revertion(owner == msg.sender, "Authorized personnel only");
     	_;
     }
-//Root modifier (to be deprecated)
+//So do roots()
     modifier roots(bytes32 _id)
     {
-    	require(deal_id[_id].cli == msg.sender);
+    	Revertion(ids[_id].hidden && ids[_id].cli != msg.sender,
+    	"This deal has a private state.");
     	_;
     }
-//Authorization modifier
-    modifier auth(bytes32 _id)
-    {
-        Deal storage p = deal_id[_id];
-        if (p.hidden) 
-            {
-                if(!clients[msg.sender].logged)
-                {
-                    revert("You must be Authorized. Please, Log In.");
-                }
-            }
-        _;
-    }
-
+    
     constructor()
     public
     {
     	owner = msg.sender;
     }
-//Pass checking func
-    function checkPass(string memory pass)
-    internal
-    {
-        assert(keccak256(pass) == passes[msg.sender]);
-        emit Password_Match();
-    }
-// SignIN/LogIN Module begin   
-    function SignIn(string name, string _pass)
+//Revertion() is to revert transaction with comment
+  	function Revertion(bool _cond, string _msg)
+  	internal
+  	pure
+  	{
+  		if (_cond)
+  		{
+  			revert(_msg);
+  		}
+  	}
+//Updates Ids <=> Deals[]
+  	function Update(uint256 num)
+  	internal
+  	view
+  	{
+  	    Deal storage _old = deals[msg.sender][num];
+  	    Deal storage _new = ids[_old.id];
+  	    _old = _new;
+  	}
+  	
+//Reverting the deal by admin
+  	function DEAL_REVERT(bytes32 _id)
+  	public
+  	admin
+  	{
+  		Deal storage rev = ids[_id];
+  		Revertion(rev.approved || rev.confirmed, 
+  		"Deal must be confirmed or approved at first");
+  		rev.approved = false;
+  		rev.confirmed = false;
+  	}
+//No passes - just for the name and for the base
+    function SignIn(string name)
     public
     {
-        clients[msg.sender] = Client(name, msg.sender, false);
+        clients[msg.sender] = Client(name);
         Base.push(clients[msg.sender]);
-        passes[msg.sender] = keccak256(_pass);
         emit Signed_In(name, msg.sender);
     }
-    
-    function LogIn(string _pass)
-    public
-    {
-        Client storage user = clients[msg.sender];
-        checkPass(_pass);
-        user.logged = true;
-        emit Authorized(user.name, msg.sender);
-    }
-//Module end
-//Admin function: create deal
+
     function newDeal(address _cli, string _desc)
+    admin
     public
     {
         bytes32 _id = keccak256(now);
         Deal memory _newDeal = Deal(_cli, _desc, _id, false, false, false);
         deals[_cli].push(_newDeal);
-        deal_id[_id] = _newDeal;
+        ids[_id] = _newDeal;
         emit deal_Created(now, _cli);
     }
-//Get deal information (auth required)
+//Full Deal info is given
     function dealInfo(bytes32 _id)
     public
     view
-    auth(_id)
-    returns(address client, string description)
+    roots(_id)
+    returns(address client, string name, string Description, bool Approved,
+    bool Confirmed, bool Private)
     {
-        Deal storage info = deal_id[_id];
-        return(info.cli, info.desc);
+        Deal storage info = ids[_id];
+        return(info.cli, clients[info.cli].name, info.desc, info.approved, 
+        info.confirmed, info.hidden);
     }
-//Client approves deal before it's been confirmed
-    function approveDeal(bytes32 _id)
+//Using Revertion() in approve/confirm section not to waste gas 
+//while duplicating transactions 
+    function approveDealByID(bytes32 _id)
     public
     roots(_id)
-    returns(bool success)
     {
-    	Deal storage _deal = deal_id[_id];
-        if (_deal.approved)
-        {
-        	revert("Deal is approved already");
-        }
+    	Deal storage _deal = ids[_id];
+        Revertion(_deal.approved, "Deal is approved already!");
+        _deal.approved = true;
         emit deal_Approved(now, _id);
     }
-//Admin function (confirm deal by ID)
+
+    function approveDealByNumber(uint256 num)
+    public
+    {
+    	Deal storage _deal = ids[deals[msg.sender][num].id];
+    	Revertion(_deal.approved, "Deal is approved already!");
+    	_deal.approved = true;
+    	Update(num);
+    	emit deal_Confirmed(now, _deal.id);
+    }
+
     function confirmDealByID(bytes32 _id)
     public
     admin
-    returns(bool success)
     {
-    	Deal storage _deal = deal_id[_id];
-    	if (_deal.confirmed)
-        {
-        	revert("Deal is confirmed already");
-        }
+        Deal storage _deal = ids[_id];
+    	Revertion(_deal.confirmed, "Deal is confirmed already!");
+    	_deal.confirmed = true;
         emit deal_Confirmed(now, _id);
     }
-//Swt deal state to private 
+
+    function confirmDealByNumber(address _cli, uint256 num)
+    public
+    admin
+    {
+    	Deal storage _deal = ids[deals[_cli][num].id];
+    	Revertion(_deal.confirmed, "Deal is confirmed already!");
+    	_deal.confirmed = true;
+    	Update(num);
+    	emit deal_Confirmed(now, _deal.id);
+    }
+//To decide: whether it's allowed for admin or client only 
     function setPrivate(bytes32 _id)
     public
-    roots(_id)
-    returns(bool success)
     {
-    	Deal storage p = deal_id[_id];
-    	assert(!p.hidden);
+    	Deal storage p = ids[_id];
+    	Revertion(p.hidden, "This deal is private by default");
     	p.hidden = true;
     	emit set_Private(_id);
     }
-//Set deal state to public (auth required)
+
     function setPublic(bytes32 _id)
     public
     roots(_id)
-    auth(_id)
-    returns(bool success)
     {
-    	Deal storage p = deal_id[_id];
-    	assert(p.hidden);
+    	Deal storage p = ids[_id];
+    	Revertion(!p.hidden, "This deal is public by default");
     	p.hidden = false;
     	emit set_Public(_id);
     }
-// Get deal ID by entering number in the list
-    function getDealID(uint8 deal_number)
+//Simple getter for deal ID
+    function getID(uint8 deal_number)
     public
-    returns(bytes32 r)
+    view
+    returns(bytes32 ID)
     {
-        r = deals[msg.sender][deal_number].identifier;
+        ID = deals[msg.sender][deal_number].id;
     }
-
-    event Authorized(string name, address user);
-    event Signed_In(string name, address user);
+//indexed events
+    event Signed_In(string indexed name, address indexed user);
    	event Password_Match();
     event set_Private(bytes32 _id);
     event set_Public(bytes32 _id);
-    event deal_Approved(uint256 time, bytes32 _id);
-    event deal_Confirmed(uint256 time, bytes32 _id);
-    event deal_Created(uint256 time, address _for);
+    event deal_Approved(uint256 indexed time, bytes32 indexed _id);
+    event deal_Confirmed(uint256 indexed time, bytes32 indexed _id);
+    event deal_Created(uint256 indexed time, address indexed _for);
 }
